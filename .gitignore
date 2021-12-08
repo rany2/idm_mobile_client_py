@@ -1,0 +1,7 @@
+# Don't include any files
+**
+
+# Include the client and TODOs
+!/client.py
+!/TODO.txt
+!/.gitignore
