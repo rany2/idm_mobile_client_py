@@ -35,8 +35,8 @@ def convert_datetime_to_aspnet_json(date):
 
 class Client:
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update(
+        self._session = requests.Session()
+        self._session.headers.update(
             {
                 "Accept": "application/json",
                 "Content-Type": "application/json; charset=UTF-8",
@@ -44,16 +44,16 @@ class Client:
                 "Token": "",  # seems a bug in their code...
             }
         )
-        self.profile_id = None
-        self.token = None
+        self._profile_id = None
+        self._token = None
 
     def set_credentials(self, profile_id, token):
-        self.profile_id = profile_id
-        self.token = token
+        self._profile_id = profile_id
+        self._token = token
 
-    def fail_on_no_credentials(func):  # pylint: disable=no-self-argument
+    def _fail_on_no_credentials(func):  # pylint: disable=no-self-argument
         def wrapper(self, *args, **kwargs):
-            if self.profile_id is None or self.token is None:
+            if self._profile_id is None or self._token is None:
                 raise Exception("No credentials set")
             return func(self, *args, **kwargs)  # pylint: disable=not-callable
 
@@ -68,7 +68,7 @@ class Client:
         headers=None,
     ):
         if method is None:
-            method = self.session.post
+            method = self._session.post
 
         if headers is None:
             headers = {}
@@ -83,19 +83,19 @@ class Client:
         ) as response:
             return response
 
-    @fail_on_no_credentials
+    @_fail_on_no_credentials
     def _request_profileid_template(self, nosig=False, include_app_json=False):
         request_json = {
             "SourceNameId": SOURCE_NAME_ID,
-            "ProfileId": int(self.profile_id),
+            "ProfileId": int(self._profile_id),
         }
         if not nosig:
-            request_json["Signature"] = hash_idm(self.token + str(self.profile_id))
+            request_json["Signature"] = hash_idm(self._token + str(self._profile_id))
         if include_app_json:
             request_json.update(APP_VERSION_JSON)
         return request_json
 
-    @fail_on_no_credentials
+    @_fail_on_no_credentials
     def _request_account_template(self, account_id, nosig=False):
         request_json = {
             "AccountId": int(account_id),
@@ -152,7 +152,7 @@ class Client:
         )
         request_json.update(
             {
-                "Signature": hash_idm(self.token + str(self.profile_id)),
+                "Signature": hash_idm(self._token + str(self._profile_id)),
             }
         )
         return self._do_request("ProfileGETAccounts", request_json=request_json).json()
@@ -208,7 +208,7 @@ class Client:
         request_json.update(
             {
                 "Signature": hash_idm(
-                    str(self.token) + str(self.profile_id) + str(economy_mode)
+                    str(self._token) + str(self._profile_id) + str(economy_mode)
                 ),
                 "ModeValue": int(economy_mode),  # 0 = off, 1 = auto, 2 = always on
             }
