@@ -1,7 +1,15 @@
-# Don't include any files
 **
-
-# Include the client and TODOs
-!/client.py
 !/TODO.txt
 !/.gitignore
+!/build.sh
+!/build_and_publish.sh
+!/clean.sh
+!/publish.sh
+!/pyproject.toml
+!/setup.cfg
+!/setup.py
+!/src
+!/src/idm_mobile_client_py
+!/src/idm_mobile_client_py/__init__.py
+!/src/idm_mobile_client_py/client.py
+!/LICENSE.md
