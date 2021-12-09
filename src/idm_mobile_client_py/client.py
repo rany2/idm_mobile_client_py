@@ -9,6 +9,8 @@ import hashlib
 
 import requests
 
+import idm_mobile_client_py.exceptions
+
 BASE_URL = "https://api.idm.net.lb/IDM_WCF_WebAPI_VB16_SEC/Services/MobileApp.svc/rest/"
 
 APP_VERSION_JSON = {
@@ -33,7 +35,7 @@ def convert_datetime_to_aspnet_json(date):
     return f"/Date({int((date - datetime.datetime(1970, 1, 1)).total_seconds() * 1000)}+0000)/"
 
 
-class Client: # pylint: disable=too-many-public-methods
+class Client:  # pylint: disable=too-many-public-methods
     def __init__(self):
         self._session = requests.Session()
         self._session.headers.update(
@@ -53,8 +55,14 @@ class Client: # pylint: disable=too-many-public-methods
 
     def _fail_on_no_credentials(func):  # pylint: disable=no-self-argument
         def wrapper(self, *args, **kwargs):
-            if self._profile_id is None or self._token is None: # pylint: disable=protected-access
-                raise Exception("No credentials set")
+            if (
+                # pylint: disable=protected-access
+                self._profile_id is None
+                or self._token is None
+            ):
+                raise idm_mobile_client_py.exceptions.NoCredentials(
+                    f"No credentials set (profile_id={self._profile_id}, token={self._token})"
+                )
             return func(self, *args, **kwargs)  # pylint: disable=not-callable
 
         return wrapper
@@ -66,6 +74,7 @@ class Client: # pylint: disable=too-many-public-methods
         request_json=None,
         method=None,
         headers=None,
+        smart=True,
     ):
         if method is None:
             method = self._session.post
@@ -81,7 +90,29 @@ class Client: # pylint: disable=too-many-public-methods
             json=request_json,
             headers=headers,
         ) as response:
-            return response
+            if response.status_code != 200:
+                raise idm_mobile_client_py.exceptions.HTTPStatusCodeError(
+                    f"{response.status_code} {response.reason}"
+                )
+
+            if smart and response.json()["Code"] != 0:
+                # raise idm_mobile_client_py.exceptions.BadJSONResponseCode(
+                #    response.json()["Message"]
+                # )
+                raise idm_mobile_client_py.exceptions.BadJSONResponseCode(
+                    response.json()
+                )
+
+            try:
+                return response.json()
+            except ValueError as exception:
+                raise idm_mobile_client_py.exceptions.NotJSONResponse(
+                    response.text
+                ) from exception
+            except Exception as exception:
+                raise idm_mobile_client_py.exceptions.UnknownError(
+                    f"{exception.__class__.__name__}: {exception}"
+                ) from exception
 
     @_fail_on_no_credentials
     def _request_profileid_template(self, nosig=False, include_app_json=False):
@@ -141,14 +172,18 @@ class Client: # pylint: disable=too-many-public-methods
             "Password": passw,
         }
         request_json.update(APP_VERSION_JSON)
-        response = self._do_request("ProfileLogin", request_json=request_json)
+
+        response = self._do_request(
+            "ProfileLogin", request_json=request_json, smart=False
+        )
         if auto_set:
-            try:
-                self.set_credentials(
-                    response.json()["ProfileId"], response.json()["Token"]
-                )
-            except Exception:  # pylint: disable=broad-except
-                pass
+            if response["Code"] != 0:
+                raise idm_mobile_client_py.exceptions.LoginFailed(response["Message"])
+
+            self.set_credentials(
+                response["ProfileId"],
+                response["Token"],
+            )
         return response
 
     def profile_get_accounts(self):
