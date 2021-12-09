@@ -10,17 +10,12 @@ AccountEditContactInfo
 AccountForgotPassword
 AccountFreeze
 AccountFreezeSerialNumber
-AccountGETFreezingRequests
 AccountGetIIIGSerial
 AccountGETMessages
 AccountGETOnlineOrders
 AccountGetPopup
-AccountGETReferrals
-AccountGETRefillPlans
 AccountGETRenewalPlans
 AccountGETSerialInBasket
-AccountGetServiceSerial
-AccountGETTrafficPolicyrequests
 AccountRefill
 AccountRefillBySMS
 AccountRefillBySMSStatus
@@ -72,8 +67,6 @@ IPTVValidateCredits
 LocationGETMouhafazat
 LocationGETResellersByCityId
 LocationGETResellersByNearest
-NewsGET
-ProductsGET
 ProfileAdd
 ProfileChangePassword
 ProfileCommit

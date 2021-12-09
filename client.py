@@ -2,6 +2,8 @@
 Reverse-engineered version of IDM Mobile app
 """
 
+# pylint: disable=missing-function-docstring, missing-class-docstring
+
 import datetime
 import hashlib
 
@@ -14,33 +16,12 @@ APP_VERSION_JSON = {
     "DeviceId": "1",
 }
 
-
-def source_name_id():
-    string = "22xD05x5F2-".replace("x", "")
-    string += "59xE7-".replace("x", "")
-    string += "480xC-".replace("x", "")
-    string += "93xAC-".replace("x", "")
-    string += "B65xFD81x26x64F".replace("x", "")
-    return string
+SOURCE_NAME_ID = "22D055F2-59E7-480C-93AC-B65FD812664F"
+IDM_HASH_PREPEND = "M0b@pWeb!~20@!dM"
 
 
 def hash_idm(str_to_append):
-    first = [77, 48, 98, 64, 112, 87, 101, 98, 33]
-    second = [50, 48, 64, 33, 100, 77]
-
-    string = ""
-
-    for i in range(0, 9):
-        string += chr(first[i])
-
-    string += "~"
-
-    for i in range(0, 6):
-        string += chr(second[i])
-
-    string += source_name_id()
-    string += str_to_append
-
+    string = f"{IDM_HASH_PREPEND}{SOURCE_NAME_ID}{str_to_append}"
     return hashlib.sha256(string.encode("utf-8")).hexdigest()
 
 
@@ -48,10 +29,8 @@ def hash_idm_userpass(user, passw):
     return hash_idm(f"{user.lower()}{passw.lower()}")
 
 
-def convert_datetime_to_aspnet_json(dt):
-    return "/Date({}+0000)/".format(
-        int((dt - datetime.datetime(1970, 1, 1)).total_seconds() * 1000)
-    )
+def convert_datetime_to_aspnet_json(date):
+    return f"/Date({int((date - datetime.datetime(1970, 1, 1)).total_seconds() * 1000)}+0000)/"
 
 
 class Client:
@@ -72,290 +51,224 @@ class Client:
         self.profile_id = profile_id
         self.token = token
 
-    def fail_on_no_credentials(func):
+    def fail_on_no_credentials(func):  # pylint: disable=no-self-argument
         def wrapper(self, *args, **kwargs):
             if self.profile_id is None or self.token is None:
                 raise Exception("No credentials set")
-            return func(self, *args, **kwargs)
+            return func(self, *args, **kwargs)  # pylint: disable=not-callable
 
         return wrapper
 
+    def _do_request(
+        self,
+        url_to_append,
+        *,
+        request_json=None,
+        method=None,
+        headers=None,
+    ):
+        if method is None:
+            method = self.session.post
+
+        if headers is None:
+            headers = {}
+
+        url = BASE_URL + url_to_append
+        request_json = request_json or {}
+
+        with method(
+            url,
+            json=request_json,
+            headers=headers,
+        ) as response:
+            return response
+
+    @fail_on_no_credentials
+    def _request_profileid_template(self, nosig=False, include_app_json=False):
+        request_json = {
+            "SourceNameId": SOURCE_NAME_ID,
+            "ProfileId": int(self.profile_id),
+        }
+        if not nosig:
+            request_json["Signature"] = hash_idm(self.token + str(self.profile_id))
+        if include_app_json:
+            request_json.update(APP_VERSION_JSON)
+        return request_json
+
+    @fail_on_no_credentials
+    def _request_account_template(self, account_id, nosig=False):
+        request_json = {
+            "AccountId": int(account_id),
+        }
+        request_json.update(
+            self._request_profileid_template(nosig=nosig, include_app_json=True)
+        )
+        return request_json
+
     def banners_get(self):
-        url = BASE_URL + "BannersGET"
         request_json = {
             "Signature": hash_idm("BannersGET"),
-            "SourceNameId": source_name_id(),
+            "SourceNameId": SOURCE_NAME_ID,
         }
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        return self._do_request("BannersGET", request_json=request_json).json()
 
     def settings_get(self):
-        url = BASE_URL + "SettingsGET"
         request_json = {
             "Signature": hash_idm("SettingsGET"),
-            "SourceNameId": source_name_id(),
+            "SourceNameId": SOURCE_NAME_ID,
         }
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        return self._do_request("SettingsGET", request_json=request_json).json()
+
+    def news_get(self):
+        request_json = {
+            "Signature": hash_idm("NewsGET"),
+            "SourceNameId": SOURCE_NAME_ID,
+        }
+        return self._do_request("NewsGET", request_json=request_json).json()
+
+    def products_get(self):
+        request_json = {
+            "Signature": hash_idm("ProductsGET"),
+            "SourceNameId": SOURCE_NAME_ID,
+        }
+        return self._do_request("ProductsGET", request_json=request_json).json()
 
     def profile_login(self, user, passw, auto_set=True):
-        url = BASE_URL + "ProfileLogin"
         request_json = {
             "Signature": hash_idm_userpass(user, passw),
-            "SourceNameId": source_name_id(),
+            "SourceNameId": SOURCE_NAME_ID,
             "UserName": user,
             "Password": passw,
         }
         request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            if auto_set:
-                self.set_credentials(
-                    response.json()["ProfileId"], response.json()["Token"]
-                )
-            return response.json()
+        response = self._do_request("ProfileLogin", request_json=request_json)
+        if auto_set:
+            self.set_credentials(response.json()["ProfileId"], response.json()["Token"])
+        return response.json()
 
-    @fail_on_no_credentials
     def profile_get_accounts(self):
-        url = BASE_URL + "ProfileGETAccounts"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        request_json = self._request_profileid_template(
+            nosig=True, include_app_json=True
+        )
+        request_json.update(
+            {
+                "Signature": hash_idm(self.token + str(self.profile_id)),
+            }
+        )
+        return self._do_request("ProfileGETAccounts", request_json=request_json).json()
 
-    @fail_on_no_credentials
     def account_get_info(self, account_id):
-        url = BASE_URL + "AccountGETInfo"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        request_json = self._request_account_template(account_id)
+        return self._do_request("AccountGETInfo", request_json=request_json).json()
 
-    @fail_on_no_credentials
     def account_get_consumption(self, account_id):
-        url = BASE_URL + "AccountGETConsumption"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        request_json = self._request_account_template(account_id)
+        return self._do_request(
+            "AccountGETConsumption", request_json=request_json
+        ).json()
 
-    @fail_on_no_credentials
-    def account_get_consumption_bulk(
-        self, account_ids
-    ):
-        url = BASE_URL + "AccountGETConsumptionBulk"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountIdList": account_ids,
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+    def account_get_consumption_bulk(self, account_ids):
+        request_json = self._request_profileid_template(include_app_json=True)
+        request_json.update(
+            {
+                "AccountIdList": account_ids,
+            }
+        )
+        return self._do_request(
+            "AccountGETConsumptionBulk", request_json=request_json
+        ).json()
 
-    @fail_on_no_credentials
-    def account_view_consumption_details(
-        self, account_id, date=None
-    ):
-        """
-        Returns a list of consumption details for a given account
-        with the option of specifying a date to get consumption details for.
-
-        Args:
-            account_id (int): Account ID
-            date (dict):
-                {
-                    "year": int,
-                    "month": int,
-                    "startdate": str,
-                }
-
-                year is the year of the date
-                month is the month of the date
-                startdate is in the DataContractJsonSerializer format
-
-        Returns: dict: API response
-        """
-        url = BASE_URL + "AccountViewConsumptionDetails"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-        }
+    def account_view_consumption_details(self, account_id, date=None):
+        request_json = self._request_account_template(account_id)
         if date is not None:
             request_json.update(
                 {
-                    "Month": int(date["month"]),
-                    "Startdate": date["startdate"],
-                    "Year": int(date["year"]),
+                    "Month": int(date.month),
+                    "Startdate": convert_datetime_to_aspnet_json(date),
+                    "Year": int(date.year),
                 }
             )
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        return self._do_request(
+            "AccountViewConsumptionDetails", request_json=request_json
+        ).json()
 
-    @fail_on_no_credentials
-    def account_view_details_per_day_per_hour(
-        self, account_id, date
-    ):
-        url = BASE_URL + "AccountViewDetailsPerDayPerHour"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-            "DayDate": date.strftime("%m/%d/%Y %H:%M:%S"),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+    def account_view_details_per_day_per_hour(self, account_id, date):
+        request_json = self._request_account_template(account_id)
+        request_json.update(
+            {
+                "DayDate": date.strftime("%m/%d/%Y %H:%M:%S"),
+            }
+        )
+        return self._do_request(
+            "AccountViewDetailsPerDayPerHour", request_json=request_json
+        ).json()
 
-    @fail_on_no_credentials
-    def account_set_economy_mode(
-        self, account_id, economy_mode
-    ):
-        url = BASE_URL + "AccountSETEconomyMode"
-        request_json = {
-            "Signature": hash_idm(str(self.token) + str(self.profile_id) + str(economy_mode)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "ModeValue": int(economy_mode),  # 0 = off, 1 = auto, 2 = always on
-            "AccountId": int(account_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+    def account_set_economy_mode(self, account_id, economy_mode):
+        request_json = self._request_account_template(account_id)
+        request_json.update(
+            {
+                "Signature": hash_idm(
+                    str(self.token) + str(self.profile_id) + str(economy_mode)
+                ),
+                "ModeValue": int(economy_mode),  # 0 = off, 1 = auto, 2 = always on
+            }
+        )
+        return self._do_request(
+            "AccountSETEconomyMode", request_json=request_json
+        ).json()
 
-    @fail_on_no_credentials
-    def account_get_change_quota_plans(
-        self, account_id
-    ):
-        url = BASE_URL + "AccountGETChangeQuotaPlans"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+    def account_get_change_quota_plans(self, account_id):
+        request_json = self._request_account_template(account_id)
+        return self._do_request(
+            "AccountGETChangeQuotaPlans", request_json=request_json
+        ).json()
 
-    @fail_on_no_credentials
     def account_get_services_info(
-        self, account_id,
+        self,
+        account_id,
     ):
-        url = BASE_URL + "AccountGETServicesInfo"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        request_json = self._request_account_template(account_id)
+        return self._do_request(
+            "AccountGETServicesInfo", request_json=request_json
+        ).json()
 
-    @fail_on_no_credentials
-    def account_edit_info(
-        self, account_id, new_account_name
-    ):
-        url = BASE_URL + "AccountEditInfo"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-            "AccountName": new_account_name,
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+    def account_edit_info(self, account_id, new_account_name):
+        request_json = self._request_account_template(account_id)
+        request_json.update(
+            {
+                "AccountName": new_account_name,
+            }
+        )
+        return self._do_request("AccountEditInfo", request_json=request_json).json()
 
-    @fail_on_no_credentials
     def account_is_valid_tr69(self, account_id):
-        url = BASE_URL + "AccountIsValidTR69"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+        request_json = self._request_account_template(account_id)
+        return self._do_request("AccountIsValidTR69", request_json=request_json).json()
 
-    @fail_on_no_credentials
-    def account_get_change_next_plan(
-        self, account_id
-    ):
-        url = BASE_URL + "AccountGETChangeNextPlan"
-        request_json = {
-            "Signature": hash_idm(self.token + str(self.profile_id)),
-            "SourceNameId": source_name_id(),
-            "ProfileId": int(self.profile_id),
-            "AccountId": int(account_id),
-        }
-        request_json.update(APP_VERSION_JSON)
-        with self.session.post(
-            url,
-            json=request_json,
-        ) as response:
-            return response.json()
+    def account_get_change_next_plan(self, account_id):
+        request_json = self._request_account_template(account_id)
+        return self._do_request(
+            "AccountGETChangeNextPlan", request_json=request_json
+        ).json()
+
+    def account_get_referrals(self, account_id):
+        request_json = self._request_account_template(account_id)
+        return self._do_request("AccountGETReferrals", request_json=request_json).json()
+
+    def account_get_refill_plans(self, account_id):
+        request_json = self._request_account_template(account_id)
+        return self._do_request(
+            "AccountGETRefillPlans", request_json=request_json
+        ).json()
+
+    def account_get_traffic_policy_requests(self, account_id):
+        request_json = self._request_account_template(account_id)
+        return self._do_request(
+            "AccountGETTrafficPolicyRequests", request_json=request_json
+        ).json()
+
+    def account_get_service_serial(self, account_id):
+        request_json = self._request_account_template(account_id)
+        return self._do_request(
+            "AccountGETServiceSerial", request_json=request_json
+        ).json()
